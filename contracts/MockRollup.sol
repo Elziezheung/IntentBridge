@@ -30,10 +30,15 @@ contract MockRollup {
     }
 
     // ─── State ────────────────────────────────────────────────────────────────
+    // Fee unit: integer tenths-of-a-gwei (×10).
+    // e.g. ArbiNova baseFeeGwei = 5  → 0.5 gwei gas price.
+    // Solidity has no float; the off-chain router converts with / FEE_SCALE.
+    uint256 public constant FEE_SCALE = 10;
+
     string  public rollupName;
     string  public rollupType;       // "optimistic" | "zk"
-    uint256 public baseFeeGwei;      // base gas price in gwei (×1e9 units)
-    uint256 public baseLatencyMs;    // base confirmation time in ms
+    uint256 public baseFeeGwei;      // base gas price, units of 0.1 gwei (÷ FEE_SCALE for real gwei)
+    uint256 public baseLatencyMs;    // soft-confirmation latency in ms (NOT L1 finality)
     uint256 public congestionLevel;  // 0–100
 
     uint256 public totalExecuted;

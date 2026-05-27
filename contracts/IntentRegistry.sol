@@ -117,25 +117,20 @@ contract IntentRegistry {
             block.timestamp, totalIntents
         ));
 
-        intents[id] = Intent({
-            id:                   id,
-            user:                 user,
-            intentType:           IntentType(intentType),
-            amount:               amount,
-            token:                token,
-            recipient:            recipient,
-            preference:           RoutingPref(preference),
-            status:               IntentStatus.PENDING,
-            submittedAt:          block.timestamp,
-            selectedRollupIndex:  0,
-            estimatedFeeGwei:     0,
-            estimatedLatencyMs:   0,
-            routeScore:           0,
-            reasonHash:           bytes32(0),
-            actualFeeGwei:        0,
-            executedAt:           0,
-            feeSavedGwei:         0
-        });
+        // Use a storage pointer and assign fields individually.
+        // A large struct literal with 17 fields in a single expression pushes
+        // too many items onto the EVM stack (limit: 16), causing a compile error.
+        Intent storage intent = intents[id];
+        intent.id         = id;
+        intent.user       = user;
+        intent.intentType = IntentType(intentType);
+        intent.amount     = amount;
+        intent.token      = token;
+        intent.recipient  = recipient;
+        intent.preference = RoutingPref(preference);
+        intent.status     = IntentStatus.PENDING;
+        intent.submittedAt= block.timestamp;
+        // Routing / execution fields default to zero — written by recordRouting / recordExecution.
 
         intentIds.push(id);
         totalIntents++;

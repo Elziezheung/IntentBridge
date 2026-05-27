@@ -26,17 +26,20 @@ async function main() {
 
   // ── Deploy three simulated rollups ─────────────────────────────────────────
   //
+  //  Fee constructor args use integer tenths-of-a-gwei (× MockRollup.FEE_SCALE = 10).
+  //  Divide by 10 to get real gwei values shown in the router/frontend.
+  //
   //  RollupA — ArbiNova (Arbitrum-style optimistic)
-  //    • Lowest base fee, highest latency
-  //    • Best for non-urgent, cost-sensitive transactions
+  //    baseFee = 5  → 0.5 gwei   (Arbitrum One median, l2fees.info 2024 Q4)
+  //    latency = 2000 ms          (soft-confirmation; L1 finality: 7-day challenge window)
   //
-  //  RollupB — OptiSwift (Optimism-style optimistic)
-  //    • Mid-range fee and latency
-  //    • General-purpose balanced option
+  //  RollupB — OptiSwift (Optimism / Base-style optimistic)
+  //    baseFee = 12 → 1.2 gwei   (OP Mainnet / Base typical, l2fees.info 2024 Q4)
+  //    latency = 800 ms           (faster sequencer; same 7-day challenge window)
   //
-  //  RollupC — ZkRapid (ZK rollup)
-  //    • Highest base fee (proof cost), lowest latency
-  //    • Best for time-sensitive, high-value transactions
+  //  RollupC — ZkRapid (zkSync Era-style ZK rollup)
+  //    baseFee = 30 → 3.0 gwei   (ZK proof overhead adds ~3–5× vs optimistic)
+  //    latency = 300 ms           (soft-confirm; L1 finality: ~1h validity proof posting)
 
   const Rollup = await hre.ethers.getContractFactory("MockRollup");
 

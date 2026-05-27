@@ -349,6 +349,31 @@ header {
 #toast.error { border-color:var(--danger); color:var(--danger); }
 #toast.ok    { border-color:var(--success); color:var(--success); }
 
+/* ── Constraint rejection panel ──────────────────────────────────────────── */
+.constraint-reject {
+  border:1px solid rgba(255,69,96,.5); background:rgba(255,69,96,.07);
+  padding:14px; margin-bottom:14px;
+}
+.constraint-reject-title {
+  color:var(--danger); font-family:var(--font-disp); font-size:.85rem;
+  font-weight:700; letter-spacing:1px; margin-bottom:10px;
+  display:flex; align-items:center; gap:8px;
+}
+.constraint-reject-row { font-size:.72rem; line-height:1.9; color:#d0b0b0; }
+.constraint-reject-row strong { color:var(--text); }
+.constraint-suggest {
+  margin-top:10px; background:var(--bg); border:1px solid var(--border);
+  padding:8px 12px; font-size:.7rem; color:var(--warn); line-height:1.7;
+}
+
+/* ── Settlement assumption badge ─────────────────────────────────────────── */
+.settlement-badge {
+  background:var(--bg); border:1px solid var(--border);
+  padding:8px 12px; font-size:.68rem; color:var(--dim);
+  margin-top:10px; line-height:1.7;
+}
+.settlement-badge strong { color:var(--accent2); }
+
 /* ── Congestion demo controls ────────────────────────────────────────────── */
 .demo-controls { display:flex; gap:8px; flex-wrap:wrap; margin-top:14px; }
 .demo-btn {
@@ -439,6 +464,21 @@ header {
         <button class="pref-btn" id="pref-cheapest" onclick="setPref('cheapest')">💰 Cheapest</button>
         <button class="pref-btn" id="pref-fastest"  onclick="setPref('fastest')">⚡ Fastest</button>
         <button class="pref-btn active" id="pref-balanced" onclick="setPref('balanced')">⚖️ Balanced</button>
+      </div>
+    </div>
+
+    <div class="field" style="margin-top:8px">
+      <label class="field-label">Max Fee <span style="color:var(--dim)">(gwei — optional hard limit)</span></label>
+      <div class="input-row">
+        <input type="number" id="maxFee" placeholder="no limit" min="0" step="any" />
+        <div class="badge">gwei</div>
+      </div>
+    </div>
+    <div class="field">
+      <label class="field-label">Max Latency <span style="color:var(--dim)">(ms — optional hard limit)</span></label>
+      <div class="input-row">
+        <input type="number" id="maxLatency" placeholder="no limit" min="0" />
+        <div class="badge">ms</div>
       </div>
     </div>
 
@@ -708,6 +748,7 @@ function renderNetworkGrid(rollups) {
       <div class="rc-bar-fill ${barClass}" style="width:${cLevel}%"></div>
     </div>
   </div>
+  ${r.settlementAssumption ? `<div style="font-size:.58rem;color:var(--dim);margin-top:8px;line-height:1.5">${r.settlementAssumption}</div>` : ""}
 </div>`;
   }).join("");
 }
@@ -729,6 +770,8 @@ async function submitIntent() {
   const amount = parseFloat(document.getElementById("amount").value);
   if (!amount || amount <= 0) { toast("Enter a valid amount", "error"); return; }
 
+  const maxFeeRaw     = document.getElementById("maxFee").value;
+  const maxLatencyRaw = document.getElementById("maxLatency").value;
   const body = {
     intentType:  document.getElementById("intentType").value,
     amount,
@@ -736,19 +779,34 @@ async function submitIntent() {
     recipient:   document.getElementById("recipient").value || undefined,
     preference,
     user:        "0xDEMO" + Math.random().toString(16).slice(2,10),
+    maxFeeGwei:   maxFeeRaw     ? parseFloat(maxFeeRaw)     : null,
+    maxLatencyMs: maxLatencyRaw ? parseInt(maxLatencyRaw)   : null,
   };
 
   const btn = document.getElementById("submitBtn");
   btn.disabled = true; btn.textContent = "Routing...";
   try {
-    const data = await apiFetch("/intents", { method:"POST", body:JSON.stringify(body) });
+    const r = await fetch(API + "/intents", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+
+    if (r.status === 422) {
+      const rejection = await r.json();
+      renderConstraintRejection(rejection);
+      toast("No rollup meets your constraints — see panel", "error");
+      return;
+    }
+    if (!r.ok) throw new Error(await r.text());
+
+    const data = await r.json();
     lastSelectedRollup = data.intent.selectedRollup;
     renderRouteDisplay(
       data.intent.allScores[0], data.intent.allScores,
       data.intent.routingReasons, true, data.intent
     );
     toast(`Routed to ${data.intent.selectedRollupName} ✓`, "ok");
-    // Poll for execution
     pollIntentStatus(data.intent.id, data.intent.estimatedLatency + 1000);
     refreshAnalytics();
   } catch(e) {
@@ -847,7 +905,31 @@ function renderRouteDisplay(winner, allScores, reasons, submitted, intentData) {
 <div style="font-size:.65rem;color:var(--dim);letter-spacing:1px;text-transform:uppercase;margin-bottom:8px">All Options</div>
 <div class="rollup-compare">${compareRows}</div>
 
+<div class="settlement-badge">
+  <strong>Finality:</strong> ${winner.settlementAssumption || "—"}
+</div>
+
 <div class="reasons-box">${reasonLines}</div>`;
+}
+
+// ─── Constraint rejection display ────────────────────────────────────────
+function renderConstraintRejection(data) {
+  const c = data.constraints || {};
+  const b = data.bestAvailable || {};
+  const parts = [];
+  if (c.maxFeeGwei   !== null && c.maxFeeGwei   !== undefined) parts.push(`Max fee: ${c.maxFeeGwei} gwei`);
+  if (c.maxLatencyMs !== null && c.maxLatencyMs !== undefined) parts.push(`Max latency: ${c.maxLatencyMs} ms`);
+
+  document.getElementById("routeDisplay").innerHTML = `
+<div class="constraint-reject">
+  <div class="constraint-reject-title">⛔ Constraints Not Satisfied</div>
+  <div class="constraint-reject-row">Your limits: <strong>${parts.join("  ·  ") || "none set"}</strong></div>
+  <div class="constraint-reject-row">Best available: <strong>${b.name}</strong> — ${b.fee} gwei · ${b.latency} ms</div>
+  <div class="constraint-suggest">💡 ${data.suggestion}</div>
+</div>
+<div class="route-empty" style="min-height:80px">
+  <div style="font-size:.75rem">Relax your constraints and resubmit</div>
+</div>`;
 }
 
 // ─── History ──────────────────────────────────────────────────────────────
