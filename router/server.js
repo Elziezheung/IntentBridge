@@ -114,11 +114,17 @@ function getLatency(rollupId) {
 }
 
 /**
- * Success probability decreases with congestion.
- * Higher congestion → more mempool competition → higher revert/drop rate.
- * Returns a value in [0.70, 1.00].
+ * Success probability model — differs by rollup type:
+ *
+ * Optimistic rollups: higher congestion → more mempool competition → higher
+ *   revert/timeout rate.  Clamped at 70% floor.
+ *
+ * ZK rollups: validity proofs guarantee cryptographic finality — a tx either
+ *   proves correctly or it doesn't.  Congestion does NOT create reverts the
+ *   way optimistic sequencers do.  Success is ~99% regardless of load.
  */
 function getSuccessProb(rollupId) {
+  if (ROLLUPS[rollupId].rollupType === "ZK") return 0.99;
   return Math.max(0.70, 1 - ROLLUPS[rollupId].congestion / 333);
 }
 
@@ -272,10 +278,15 @@ app.post("/api/intents", (req, res) => {
   const id      = "0x" + crypto.randomBytes(32).toString("hex");
   const scores  = scoreAllRollups(preference);
   const winner  = scores[0];
-  const worst   = scores[scores.length - 1];
   const reasons = buildReasons(winner, scores);
 
-  const feeSaved = Math.max(0, worst.fee - winner.fee);
+  // Compare against the most expensive / slowest option — not the worst-SCORING
+  // one (worst score ≠ worst fee; e.g. a slow-but-cheap rollup scores low but
+  // saves nothing vs. the winner in fee terms).
+  const maxFee     = Math.max(...scores.map(s => s.fee));
+  const maxLatency = Math.max(...scores.map(s => s.latency));
+  const feeSaved     = Math.max(0, maxFee     - winner.fee);
+  const latencySaved = Math.max(0, maxLatency - winner.latency);
 
   const intent = {
     id,
@@ -294,6 +305,7 @@ app.post("/api/intents", (req, res) => {
     routingReasons:     reasons,
     allScores:          scores,
     feeSaved:           +feeSaved.toFixed(4),
+    latencySaved,
     status:             "routed",
     submittedAt:        Date.now(),
     executedAt:         null,
@@ -348,19 +360,39 @@ app.post("/api/intents/batch-preview", (req, res) => {
   const scores   = scoreAllRollups(preference);
   const winner   = scores[0];
 
-  // Batching model: gas overhead is amortised across N transactions.
-  // Single tx base overhead: ~21000 gas.  Batch saves ~80% of base overhead.
-  const singleFee = winner.fee;
-  const batchFee  = singleFee + (singleFee * 0.2 * (count - 1)) / count;
-  const saving    = +((singleFee - batchFee) * count).toFixed(4);
+  // EVM batching model — based on real gas mechanics:
+  //   Every Ethereum transaction pays a fixed 21,000 gas base overhead
+  //   (ECDSA verification + nonce update + value transfer bookkeeping).
+  //   Batching N intents into one multicall shares this overhead across all N,
+  //   reducing the per-intent base cost from 21,000 to 21,000/N gas.
+  //
+  //   Per-intent execution gas (storage writes, token transfers) ≈ 50,000 gas
+  //   and cannot be amortised — it is paid regardless.
+  //
+  //   Single:  (21,000 + 50,000) × gasPriceGwei = 71,000 × p   gwei
+  //   Batch:   (21,000/N + 50,000) × gasPriceGwei              gwei per intent
+  //   Max saving: 21,000 × (1 − 1/N) / 71,000 ≈ 29.5% as N → ∞
+
+  const BASE_GAS   = 21_000;
+  const INTENT_GAS = 50_000;
+  const n          = Math.max(2, Math.min(500, Number(count)));
+  const gasPrice   = winner.fee;   // gwei per gas unit
+
+  const singleCost = gasPrice * (BASE_GAS + INTENT_GAS);
+  const batchCost  = gasPrice * (BASE_GAS / n + INTENT_GAS);
+  const savingPer  = singleCost - batchCost;
+  const savingPct  = (savingPer / singleCost) * 100;
 
   res.json({
-    rollup:      winner.name,
-    count,
-    singleFee,
-    batchFeePerIntent: +batchFee.toFixed(4),
-    totalSaving: saving,
-    savingPct:   +(((singleFee - batchFee) / singleFee) * 100).toFixed(1),
+    rollup:            winner.name,
+    count:             n,
+    gasPriceGwei:      gasPrice,
+    singleCostGwei:    +singleCost.toFixed(2),
+    batchCostGwei:     +batchCost.toFixed(2),
+    savingPerIntent:   +savingPer.toFixed(2),
+    totalSavingGwei:   +(savingPer * n).toFixed(2),
+    savingPct:         +savingPct.toFixed(1),
+    maxTheoreticalPct: +((BASE_GAS / (BASE_GAS + INTENT_GAS)) * 100).toFixed(1),
   });
 });
 

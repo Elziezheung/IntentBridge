@@ -778,7 +778,7 @@ function renderRouteDisplay(winner, allScores, reasons, submitted, intentData) {
   const winColor     = rollupColors[winner.rollupId] || "var(--accent)";
 
   const feeTag = submitted
-    ? `<span style="color:var(--success)">Save ${intentData.feeSaved} gwei</span>`
+    ? `<span style="color:var(--success)">Save ${intentData.feeSaved} gwei · ${intentData.latencySaved}ms vs worst</span>`
     : `<span style="color:var(--dim)">preview</span>`;
 
   const breakdown  = winner.scoreBreakdown;
@@ -902,10 +902,12 @@ async function previewBatch() {
     const el = document.getElementById("batchResult");
     el.style.display = "block";
     el.innerHTML = `
-<div>Rollup: <span style="color:var(--accent)">${d.rollup}</span></div>
-<div>Single intent fee: <span style="color:var(--warn)">${d.singleFee} gwei</span></div>
-<div>Batch (${d.count} intents) fee per intent: <span style="color:var(--success)">${d.batchFeePerIntent} gwei</span></div>
-<div>Total saving: <span class="highlight">${d.totalSaving} gwei (${d.savingPct}% reduction)</span></div>`;
+<div>Rollup: <span style="color:var(--accent)">${d.rollup}</span>  ·  Gas price: ${d.gasPriceGwei} gwei/gas</div>
+<div>Single tx cost: <span style="color:var(--warn)">${d.singleCostGwei} gwei</span>  <span style="color:var(--dim)">(21,000 + 50,000 gas)</span></div>
+<div>Batch of ${d.count} — cost per intent: <span style="color:var(--success)">${d.batchCostGwei} gwei</span>  <span style="color:var(--dim)">(21,000/${d.count} + 50,000 gas)</span></div>
+<div>Saving per intent: <span class="highlight">${d.savingPerIntent} gwei (${d.savingPct}%)</span></div>
+<div>Total saving for ${d.count} intents: <span class="highlight">${d.totalSavingGwei} gwei</span></div>
+<div style="color:var(--dim);font-size:.65rem;margin-top:4px">Theoretical max saving (N→∞): ${d.maxTheoreticalPct}%  ·  Source: EVM 21,000 gas base overhead</div>`;
   } catch(e) { toast("Batch preview failed", "error"); }
 }
 

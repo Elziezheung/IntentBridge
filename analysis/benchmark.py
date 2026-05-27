@@ -38,6 +38,10 @@ class Rollup:
         return int(self.base_latency_ms * (1 + congestion / 100))
 
     def success_prob(self, congestion: float) -> float:
+        # ZK rollups use validity proofs — finality is cryptographically guaranteed,
+        # not affected by congestion the way optimistic sequencers are.
+        if self.rollup_type == "ZK":
+            return 0.99
         return max(0.70, 1 - congestion / 333)
 
 
@@ -72,10 +76,12 @@ def route(congestions: Dict[str, float], preference: str) -> Tuple[Rollup, float
 
     scores   = [score(i) for i in range(len(ROLLUPS))]
     best_idx = scores.index(max(scores))
-    worst_idx= scores.index(min(scores))
 
-    fee_saved     = fees[worst_idx]     - fees[best_idx]
-    latency_saved = latencies[worst_idx] - latencies[best_idx]
+    # Compare against the most expensive / slowest option — not the worst-scoring
+    # rollup (worst score ≠ worst fee; e.g. a cheap-but-slow chain scores low for
+    # "fastest" but is actually cheaper than the winner).
+    fee_saved     = max(fees)      - fees[best_idx]
+    latency_saved = max(latencies) - latencies[best_idx]
     return ROLLUPS[best_idx], max(0, fee_saved), max(0, latency_saved)
 
 # ─── Congestion scenarios ─────────────────────────────────────────────────────
@@ -127,12 +133,7 @@ def run_benchmark() -> List[ScenarioResult]:
         for pref in PREFERENCES:
             res = ScenarioResult(scenario_name, pref)
             for _ in range(N_INTENTS):
-                congestions = {r.id: max(0, min(100, cong_fn()[k]))
-                               for r, k in zip(ROLLUPS, ["rollupA","rollupB","rollupC"])}
-                congestions = cong_fn()
-                # clamp
-                congestions = {k: max(0, min(100, v)) for k, v in congestions.items()}
-
+                congestions = {k: max(0, min(100, v)) for k, v in cong_fn().items()}
                 best, fee_saved, lat_saved = route(congestions, pref)
                 res.fee_savings.append(fee_saved)
                 res.latency_savings.append(lat_saved)
@@ -152,8 +153,8 @@ def print_table(results: List[ScenarioResult]):
     for scenario in SCENARIOS:
         print(f"\n  Scenario: {scenario.strip()}")
         print("  " + "─" * 95)
-        print(f"  {'Preference':<12}  {'Avg Fee Saved':>14}  {'Median':>8}  "
-              f"{'Total Saved':>12}  {'Avg Lat Saved':>14}  {'Most Picked':<14}")
+        print(f"  {'Preference':<12}  {'Avg Fee Saved':>14}  {'Avg Lat Saved':>14}  "
+              f"{'Total Fee Saved':>16}  {'Most Picked':<16}")
         print("  " + "─" * 95)
 
         for r in results:
@@ -163,9 +164,8 @@ def print_table(results: List[ScenarioResult]):
             most_name   = next(rl.name for rl in ROLLUPS if rl.id == most_picked)
             pct         = r.rollup_picks[most_picked] / N_INTENTS * 100
             print(f"  {r.preference:<12}  {r.avg_fee_saving:>13.4f}g  "
-                  f"{r.median_fee_saving:>7.4f}g  "
-                  f"{r.total_fee_saving:>10.2f}g  "
                   f"{r.avg_latency_saving:>12.0f}ms  "
+                  f"{r.total_fee_saving:>14.2f}g  "
                   f"{most_name} ({pct:.0f}%)")
 
     print("\n" + "═" * 100)
@@ -193,18 +193,24 @@ def print_scalability_analysis(results: List[ScenarioResult]):
     # Routing adds most value when congestion is asymmetric
     asym_results = [r for r in results if "Asymmetric" in r.scenario]
     unif_results = [r for r in results if "Uniform Medium" in r.scenario]
-    asym_avg = statistics.mean(r.avg_fee_saving for r in asym_results)
-    unif_avg = statistics.mean(r.avg_fee_saving for r in unif_results)
-    uplift   = (asym_avg / unif_avg - 1) * 100 if unif_avg > 0 else 0
+    asym_avg  = statistics.mean(r.avg_fee_saving for r in asym_results)
+    unif_avg  = statistics.mean(r.avg_fee_saving for r in unif_results)
+    high_results = [r for r in results if "Uniform High" in r.scenario]
+    high_avg  = statistics.mean(r.avg_fee_saving for r in high_results)
 
-    print(f"\n  Asymmetric congestion uplift vs. uniform medium:")
-    print(f"    Uniform Medium avg saving : {unif_avg:.4f} gwei")
-    print(f"    Asymmetric     avg saving : {asym_avg:.4f} gwei")
-    print(f"    Routing uplift            : {uplift:.1f}%")
+    print(f"\n  Fee savings by congestion pattern (avg across all preferences):")
+    print(f"    Uniform Medium avg saving : {unif_avg:.4f} gwei/intent")
+    print(f"    Asymmetric     avg saving : {asym_avg:.4f} gwei/intent")
+    print(f"    Uniform High   avg saving : {high_avg:.4f} gwei/intent")
     print()
-    print("  → Routing provides highest value during asymmetric congestion,")
-    print("    exactly when users manually choosing a chain are most likely")
-    print("    to pick a suboptimal, overloaded rollup.")
+    print("  → Absolute fee savings are highest when ALL chains are congested")
+    print("    (uniform high): fees surge across the board, so picking the")
+    print("    cheapest becomes more valuable.")
+    print()
+    print("  → Routing shows its ADAPTIVE value during asymmetric congestion:")
+    print("    the router correctly avoids the spiked chain (ArbiNova 85%)")
+    print("    and switches to a cheaper alternative — a decision a manual")
+    print("    user following habit would likely get wrong.")
     print()
 
     # ZK vs optimistic routing bias
