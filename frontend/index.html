@@ -1,0 +1,971 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>IntentBridge — Cross-Rollup Intent Router</title>
+<link href="https://fonts.googleapis.com/css2?family=Space+Mono:wght@400;700&family=Syne:wght@400;600;800&display=swap" rel="stylesheet" />
+<style>
+/* ── Design tokens ─────────────────────────────────────────────────────────── */
+:root {
+  --bg:        #050a0e;
+  --surface:   #0d1b24;
+  --surface2:  #112233;
+  --border:    #1e3448;
+  --accent:    #00e5ff;
+  --accent2:   #7b61ff;
+  --success:   #00ff9d;
+  --warn:      #ffb800;
+  --danger:    #ff4560;
+  --text:      #e0f0ff;
+  --dim:       #607080;
+  --ra:        #00e5ff;   /* rollup A */
+  --rb:        #ff4560;   /* rollup B */
+  --rc:        #7b61ff;   /* rollup C */
+  --font-mono: 'Space Mono', monospace;
+  --font-disp: 'Syne', sans-serif;
+}
+
+* { margin:0; padding:0; box-sizing:border-box; }
+
+body {
+  background: var(--bg);
+  color:      var(--text);
+  font-family: var(--font-mono);
+  min-height: 100vh;
+  overflow-x: hidden;
+}
+
+/* Grid background */
+body::before {
+  content:'';
+  position:fixed; inset:0;
+  background-image:
+    linear-gradient(rgba(0,229,255,.025) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(0,229,255,.025) 1px, transparent 1px);
+  background-size:40px 40px;
+  pointer-events:none;
+}
+
+/* Ambient orbs */
+.orb { position:fixed; border-radius:50%; filter:blur(80px); pointer-events:none; z-index:0; }
+.orb-1 { width:500px; height:500px; background:rgba(0,229,255,.05);  top:-150px;  left:-150px; }
+.orb-2 { width:400px; height:400px; background:rgba(123,97,255,.06); bottom:-100px; right:-100px; }
+
+/* App wrapper */
+.app { position:relative; z-index:1; max-width:1200px; margin:0 auto; padding:0 24px 80px; }
+
+/* ── Header ──────────────────────────────────────────────────────────────── */
+header {
+  display:flex; align-items:center; justify-content:space-between;
+  padding:28px 0 36px;
+  border-bottom:1px solid var(--border);
+  margin-bottom:32px;
+}
+.logo {
+  font-family:var(--font-disp);
+  font-size:1.8rem; font-weight:800; letter-spacing:-1px;
+  background:linear-gradient(135deg,var(--accent),var(--accent2));
+  -webkit-background-clip:text; -webkit-text-fill-color:transparent;
+}
+.logo span {
+  font-weight:400; font-size:.7rem; letter-spacing:3px;
+  display:block; background:none; -webkit-text-fill-color:var(--dim); margin-top:-2px;
+}
+.header-right { display:flex; align-items:center; gap:12px; }
+.api-status {
+  font-size:.65rem; letter-spacing:1px; padding:5px 12px;
+  border:1px solid var(--border); color:var(--dim);
+  display:flex; align-items:center; gap:6px;
+}
+.api-status .dot { width:6px; height:6px; border-radius:50%; background:var(--dim); }
+.api-status.online .dot  { background:var(--success); box-shadow:0 0 8px var(--success); }
+.api-status.offline .dot { background:var(--danger); }
+.api-status.online  { color:var(--success); border-color:rgba(0,255,157,.3); }
+.api-status.offline { color:var(--danger);  border-color:rgba(255,69,96,.3); }
+
+/* ── Section title ───────────────────────────────────────────────────────── */
+.section-title {
+  font-family:var(--font-disp); font-size:.75rem; font-weight:600;
+  letter-spacing:3px; text-transform:uppercase; color:var(--dim);
+  margin-bottom:14px; display:flex; align-items:center; gap:8px;
+}
+.section-title::before { content:''; width:20px; height:1px; background:var(--dim); }
+
+/* ── Panel ────────────────────────────────────────────────────────────────── */
+.panel {
+  background:var(--surface); border:1px solid var(--border);
+  padding:24px; position:relative;
+  animation:fadeUp .45s ease both;
+}
+.panel::before {
+  content:''; position:absolute; top:0; left:0; right:0; height:2px;
+  background:linear-gradient(90deg,var(--accent),var(--accent2));
+}
+.panel.rb::before { background:linear-gradient(90deg,var(--rb),var(--warn)); }
+.panel.rc::before { background:linear-gradient(90deg,var(--rc),var(--accent)); }
+
+@keyframes fadeUp {
+  from { opacity:0; transform:translateY(14px); }
+  to   { opacity:1; transform:translateY(0); }
+}
+
+.panel-title {
+  font-family:var(--font-disp); font-size:.95rem; font-weight:600;
+  letter-spacing:2px; text-transform:uppercase; color:var(--accent);
+  margin-bottom:20px; display:flex; align-items:center; gap:8px;
+}
+.panel-title .dot { width:7px; height:7px; background:var(--accent); flex-shrink:0; }
+
+/* ── Rollup network status bar ────────────────────────────────────────────── */
+.network-grid { display:grid; grid-template-columns:repeat(3,1fr); gap:16px; margin-bottom:28px; }
+@media(max-width:700px){ .network-grid { grid-template-columns:1fr; } }
+
+.rollup-card {
+  background:var(--surface); border:1px solid var(--border);
+  padding:18px; position:relative; cursor:default;
+  transition:border-color .2s;
+}
+.rollup-card:hover { border-color:var(--accent); }
+.rollup-card.selected-rollup { border-color:var(--success); box-shadow:0 0 20px rgba(0,255,157,.1); }
+.rollup-card::before { content:''; position:absolute; top:0; left:0; right:0; height:2px; }
+.rollup-card.ra::before { background:var(--ra); }
+.rollup-card.rb::before { background:var(--rb); }
+.rollup-card.rc::before { background:var(--rc); }
+
+.rc-header { display:flex; align-items:center; justify-content:space-between; margin-bottom:12px; }
+.rc-name { font-family:var(--font-disp); font-size:1rem; font-weight:700; }
+.rc-type { font-size:.6rem; letter-spacing:1.5px; padding:2px 8px; border:1px solid var(--border); color:var(--dim); text-transform:uppercase; }
+.rc-metrics { display:grid; grid-template-columns:1fr 1fr; gap:8px; margin-bottom:10px; }
+.rc-metric .label { font-size:.6rem; color:var(--dim); letter-spacing:1px; text-transform:uppercase; }
+.rc-metric .value { font-size:.9rem; font-weight:700; margin-top:2px; }
+.rc-bar-wrap { margin-top:8px; }
+.rc-bar-label { display:flex; justify-content:space-between; font-size:.6rem; color:var(--dim); margin-bottom:4px; }
+.rc-bar-track { height:4px; background:var(--surface2); border:1px solid var(--border); }
+.rc-bar-fill  { height:100%; transition:width .6s ease; }
+.rc-bar-fill.low  { background:var(--success); }
+.rc-bar-fill.med  { background:var(--warn); }
+.rc-bar-fill.high { background:var(--danger); }
+
+/* ── Main 2-col grid ─────────────────────────────────────────────────────── */
+.main-grid  { display:grid; grid-template-columns:1fr 1fr; gap:24px; margin-bottom:24px; }
+.bottom-grid{ display:grid; grid-template-columns:1fr 1fr; gap:24px; margin-bottom:24px; }
+@media(max-width:800px){ .main-grid,.bottom-grid { grid-template-columns:1fr; } }
+
+/* ── Form elements ───────────────────────────────────────────────────────── */
+.field { margin-bottom:14px; }
+.field-label {
+  font-size:.65rem; color:var(--dim); letter-spacing:1px;
+  text-transform:uppercase; margin-bottom:6px; display:block;
+}
+.input-row {
+  display:flex; border:1px solid var(--border); background:var(--bg);
+  transition:border-color .2s;
+}
+.input-row:focus-within { border-color:var(--accent); }
+.input-row input, .input-row select {
+  flex:1; background:transparent; border:none; outline:none;
+  color:var(--text); font-family:var(--font-mono);
+  font-size:.85rem; padding:11px 14px;
+}
+.input-row select option { background:var(--surface); }
+.input-row .badge {
+  display:flex; align-items:center; padding:0 14px;
+  background:var(--surface2); font-size:.7rem; font-weight:700;
+  color:var(--accent2); letter-spacing:1px;
+  border-left:1px solid var(--border); white-space:nowrap;
+}
+
+/* Preference radio */
+.pref-group { display:flex; gap:0; border:1px solid var(--border); }
+.pref-btn {
+  flex:1; padding:9px 0; background:transparent; border:none;
+  color:var(--dim); font-family:var(--font-mono); font-size:.7rem;
+  cursor:pointer; letter-spacing:1px; text-transform:uppercase; transition:all .2s;
+  border-right:1px solid var(--border);
+}
+.pref-btn:last-child { border-right:none; }
+.pref-btn.active { background:var(--surface2); color:var(--accent); }
+
+/* Action button */
+.btn {
+  width:100%; padding:13px; border:none; font-family:var(--font-mono);
+  font-size:.8rem; font-weight:700; letter-spacing:2px; cursor:pointer;
+  text-transform:uppercase; transition:opacity .2s, transform .1s;
+  margin-top:6px;
+}
+.btn-primary { background:linear-gradient(135deg,var(--accent),var(--accent2)); color:#000; }
+.btn-ghost   { background:transparent; border:1px solid var(--border); color:var(--dim); margin-top:8px; }
+.btn-ghost:hover  { border-color:var(--accent); color:var(--accent); }
+.btn-primary:hover { opacity:.9; }
+.btn:active  { transform:scale(.99); }
+.btn:disabled{ opacity:.35; cursor:not-allowed; }
+
+/* ── Routing decision panel ──────────────────────────────────────────────── */
+.route-empty {
+  display:flex; flex-direction:column; align-items:center; justify-content:center;
+  height:100%; min-height:200px; color:var(--dim); font-size:.75rem;
+  letter-spacing:1px; text-align:center; gap:8px;
+}
+.route-empty .icon { font-size:2rem; opacity:.3; }
+
+.selected-badge {
+  display:flex; align-items:center; gap:10px; padding:14px;
+  border:1px solid var(--success); background:rgba(0,255,157,.05);
+  margin-bottom:16px;
+}
+.selected-badge .checkmark { color:var(--success); font-size:1.2rem; }
+.selected-badge .rname { font-family:var(--font-disp); font-size:1.1rem; font-weight:700; }
+.selected-badge .rscore { margin-left:auto; font-size:.75rem; color:var(--success); }
+
+.score-bars { margin-bottom:16px; }
+.score-row { margin-bottom:10px; }
+.score-row-hd { display:flex; justify-content:space-between; font-size:.65rem; color:var(--dim); letter-spacing:1px; margin-bottom:4px; }
+.score-track { height:8px; background:var(--surface2); border:1px solid var(--border); }
+.score-fill  { height:100%; transition:width .8s cubic-bezier(.4,0,.2,1); }
+
+.rollup-compare { font-size:.7rem; }
+.compare-row {
+  display:flex; align-items:center; gap:10px;
+  padding:8px 0; border-bottom:1px solid var(--border);
+}
+.compare-row:last-child { border-bottom:none; }
+.compare-rank { color:var(--dim); width:16px; flex-shrink:0; }
+.compare-name { flex:1; font-weight:700; }
+.compare-score { color:var(--accent); width:52px; text-align:right; flex-shrink:0; }
+.compare-fee   { color:var(--warn);  width:70px; text-align:right; flex-shrink:0; }
+.compare-lat   { color:var(--dim);  width:60px; text-align:right; flex-shrink:0; }
+.compare-row.winner .compare-name::after { content:'✓'; color:var(--success); margin-left:5px; }
+
+.reasons-box {
+  background:var(--bg); border:1px solid var(--border); padding:12px;
+  font-size:.7rem; line-height:1.9; margin-top:14px;
+}
+.reason-line::before { content:'→ '; color:var(--accent); }
+
+/* ── Info tiles ──────────────────────────────────────────────────────────── */
+.info-tiles { display:grid; grid-template-columns:1fr 1fr 1fr; gap:8px; margin:14px 0; }
+.tile { background:var(--bg); border:1px solid var(--border); padding:10px; }
+.tile-label { font-size:.6rem; color:var(--dim); letter-spacing:1px; text-transform:uppercase; }
+.tile-value { font-size:1rem; font-weight:700; color:var(--accent); margin-top:2px; }
+.tile-value.green { color:var(--success); }
+.tile-value.warn  { color:var(--warn); }
+
+/* ── History table ───────────────────────────────────────────────────────── */
+.history-table { font-size:.7rem; }
+.ht-header {
+  display:grid; grid-template-columns:2fr 1fr 1fr 1fr 80px;
+  gap:4px; color:var(--dim); font-size:.6rem; letter-spacing:1px;
+  padding:6px 0; border-bottom:1px solid var(--border);
+}
+.ht-row {
+  display:grid; grid-template-columns:2fr 1fr 1fr 1fr 80px;
+  gap:4px; padding:8px 0; border-bottom:1px solid rgba(30,52,72,.5);
+  animation:fadeIn .3s ease;
+}
+@keyframes fadeIn { from{opacity:0} to{opacity:1} }
+.ht-row:last-child { border-bottom:none; }
+.status-chip {
+  font-size:.58rem; padding:2px 7px; letter-spacing:.5px; text-transform:uppercase;
+  border:1px solid; display:inline-block;
+}
+.status-chip.executed { color:var(--success); border-color:rgba(0,255,157,.4); }
+.status-chip.routed   { color:var(--warn);    border-color:rgba(255,184,0,.4); }
+
+/* ── Analytics ───────────────────────────────────────────────────────────── */
+.analytics-grid { display:grid; grid-template-columns:1fr 1fr; gap:14px; margin-bottom:16px; }
+.stat-big { background:var(--bg); border:1px solid var(--border); padding:14px; }
+.stat-big-label { font-size:.6rem; color:var(--dim); letter-spacing:1px; text-transform:uppercase; }
+.stat-big-value { font-size:1.6rem; font-weight:700; color:var(--accent); margin-top:4px; font-family:var(--font-disp); }
+.stat-big-value.green { color:var(--success); }
+
+.dist-bar-group { margin-top:16px; }
+.dist-row { display:flex; align-items:center; gap:10px; margin-bottom:10px; font-size:.7rem; }
+.dist-label { width:80px; color:var(--dim); flex-shrink:0; }
+.dist-track { flex:1; height:10px; background:var(--surface2); border:1px solid var(--border); }
+.dist-fill  { height:100%; transition:width .6s ease; }
+.dist-count { width:30px; text-align:right; color:var(--text); }
+
+/* ── Batch preview ───────────────────────────────────────────────────────── */
+.batch-row { display:flex; align-items:center; gap:10px; margin-bottom:10px; }
+.batch-input {
+  flex:1; background:var(--bg); border:1px solid var(--border); outline:none;
+  color:var(--text); font-family:var(--font-mono); font-size:.85rem; padding:8px 12px;
+}
+.batch-input:focus { border-color:var(--accent); }
+.batch-result {
+  background:var(--bg); border:1px solid var(--border); padding:12px;
+  font-size:.75rem; line-height:1.9;
+}
+.batch-result .highlight { color:var(--success); font-weight:700; }
+
+/* ── Trust model / analysis section ─────────────────────────────────────── */
+.analysis-section {
+  border:1px solid var(--border); background:var(--surface);
+  margin-bottom:24px; animation:fadeUp .5s ease .2s both;
+}
+.analysis-header {
+  display:flex; align-items:center; justify-content:space-between;
+  padding:16px 20px; cursor:pointer; user-select:none;
+  border-bottom:1px solid var(--border);
+}
+.analysis-header:hover { background:var(--surface2); }
+.analysis-title {
+  font-family:var(--font-disp); font-size:.9rem; font-weight:600;
+  letter-spacing:2px; text-transform:uppercase; color:var(--accent2);
+}
+.analysis-toggle { color:var(--dim); font-size:1rem; transition:transform .3s; }
+.analysis-toggle.open { transform:rotate(180deg); }
+.analysis-body { padding:24px; display:none; }
+.analysis-body.open { display:block; }
+.analysis-body h3 { font-family:var(--font-disp); font-size:.8rem; font-weight:600; color:var(--accent); letter-spacing:1.5px; text-transform:uppercase; margin:20px 0 8px; }
+.analysis-body h3:first-child { margin-top:0; }
+.analysis-body p  { font-size:.75rem; line-height:1.8; color:#a0b8c8; }
+.analysis-body ul { font-size:.75rem; line-height:1.9; color:#a0b8c8; margin-left:16px; }
+.analysis-body li::marker { color:var(--accent); }
+.analysis-body .code-block {
+  background:var(--bg); border:1px solid var(--border); padding:12px 16px;
+  font-size:.7rem; margin:10px 0; line-height:1.8; color:var(--success);
+  font-family:var(--font-mono); overflow-x:auto;
+}
+
+/* ── Arch diagram ────────────────────────────────────────────────────────── */
+.arch-diagram {
+  background:var(--bg); border:1px solid var(--border);
+  padding:16px; margin:16px 0; font-size:.68rem; line-height:1.9;
+  color:var(--accent); font-family:var(--font-mono);
+}
+
+/* ── Toast ───────────────────────────────────────────────────────────────── */
+#toast {
+  position:fixed; bottom:28px; right:28px;
+  background:var(--surface2); border:1px solid var(--accent);
+  color:var(--accent); font-family:var(--font-mono); font-size:.75rem;
+  padding:10px 18px; z-index:9999;
+  opacity:0; transform:translateY(8px); transition:all .3s;
+  pointer-events:none; max-width:320px;
+}
+#toast.show  { opacity:1; transform:translateY(0); }
+#toast.error { border-color:var(--danger); color:var(--danger); }
+#toast.ok    { border-color:var(--success); color:var(--success); }
+
+/* ── Congestion demo controls ────────────────────────────────────────────── */
+.demo-controls { display:flex; gap:8px; flex-wrap:wrap; margin-top:14px; }
+.demo-btn {
+  background:transparent; border:1px solid var(--border); color:var(--dim);
+  font-family:var(--font-mono); font-size:.65rem; padding:5px 12px;
+  cursor:pointer; letter-spacing:.5px; transition:all .2s;
+}
+.demo-btn:hover { border-color:var(--accent2); color:var(--accent2); }
+</style>
+</head>
+<body>
+<div class="orb orb-1"></div>
+<div class="orb orb-2"></div>
+
+<div class="app">
+
+<!-- ── Header ────────────────────────────────────────────────────────────── -->
+<header>
+  <div class="logo">
+    IntentBridge
+    <span>CROSS-ROLLUP INTENT ROUTER  ·  SC6019 OPTION 6</span>
+  </div>
+  <div class="header-right">
+    <div class="api-status offline" id="apiStatus">
+      <span class="dot"></span>
+      <span id="apiStatusText">Connecting...</span>
+    </div>
+  </div>
+</header>
+
+<!-- ── Network Status ────────────────────────────────────────────────────── -->
+<div class="section-title">Live Network Status</div>
+<div class="network-grid" id="networkGrid">
+  <!-- Populated by JS -->
+  <div class="rollup-card ra" style="opacity:.4">Loading ArbiNova...</div>
+  <div class="rollup-card rb" style="opacity:.4">Loading OptiSwift...</div>
+  <div class="rollup-card rc" style="opacity:.4">Loading ZkRapid...</div>
+</div>
+
+<!-- ── Submit & Route ─────────────────────────────────────────────────────── -->
+<div class="main-grid">
+
+  <!-- Intent form -->
+  <div class="panel">
+    <div class="panel-title"><span class="dot"></span>Submit Intent</div>
+
+    <div class="field">
+      <label class="field-label">Intent Type</label>
+      <div class="input-row">
+        <select id="intentType">
+          <option value="payment">Payment — send tokens to address</option>
+          <option value="token_swap">Token Swap — exchange tokens</option>
+          <option value="asset_transfer">Asset Transfer — bridge or move assets</option>
+        </select>
+      </div>
+    </div>
+
+    <div class="field">
+      <label class="field-label">Amount</label>
+      <div class="input-row">
+        <input type="number" id="amount" placeholder="0.00" min="0" step="any" oninput="livePreview()" />
+        <div class="badge" id="tokenBadge">ETH</div>
+      </div>
+    </div>
+
+    <div class="field">
+      <label class="field-label">Token</label>
+      <div class="input-row">
+        <select id="token" onchange="document.getElementById('tokenBadge').textContent=this.value">
+          <option value="ETH">ETH</option>
+          <option value="USDC">USDC</option>
+          <option value="WBTC">WBTC</option>
+          <option value="DAI">DAI</option>
+        </select>
+      </div>
+    </div>
+
+    <div class="field">
+      <label class="field-label">Recipient Address</label>
+      <div class="input-row">
+        <input type="text" id="recipient" placeholder="0x…" />
+      </div>
+    </div>
+
+    <div class="field">
+      <label class="field-label">Routing Preference</label>
+      <div class="pref-group">
+        <button class="pref-btn" id="pref-cheapest" onclick="setPref('cheapest')">💰 Cheapest</button>
+        <button class="pref-btn" id="pref-fastest"  onclick="setPref('fastest')">⚡ Fastest</button>
+        <button class="pref-btn active" id="pref-balanced" onclick="setPref('balanced')">⚖️ Balanced</button>
+      </div>
+    </div>
+
+    <button class="btn btn-primary" onclick="submitIntent()" id="submitBtn">Submit Intent</button>
+    <button class="btn btn-ghost"   onclick="livePreview()">Preview Route (no submit)</button>
+  </div>
+
+  <!-- Routing decision -->
+  <div class="panel">
+    <div class="panel-title"><span class="dot"></span>Routing Decision</div>
+    <div id="routeDisplay">
+      <div class="route-empty">
+        <div class="icon">⟳</div>
+        <div>Submit an intent or click<br>"Preview Route" to see routing logic</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ── Analytics & History ────────────────────────────────────────────────── -->
+<div class="bottom-grid">
+
+  <!-- Analytics -->
+  <div class="panel rc">
+    <div class="panel-title" style="color:var(--accent2)"><span class="dot" style="background:var(--accent2)"></span>Analytics</div>
+
+    <div class="analytics-grid">
+      <div class="stat-big">
+        <div class="stat-big-label">Total Intents</div>
+        <div class="stat-big-value" id="statTotal">0</div>
+      </div>
+      <div class="stat-big">
+        <div class="stat-big-label">Gwei Saved</div>
+        <div class="stat-big-value green" id="statSaved">0.000</div>
+      </div>
+      <div class="stat-big">
+        <div class="stat-big-label">Executed</div>
+        <div class="stat-big-value" id="statExec">0</div>
+      </div>
+      <div class="stat-big">
+        <div class="stat-big-label">Avg Fee (gwei)</div>
+        <div class="stat-big-value warn" id="statAvgFee">—</div>
+      </div>
+    </div>
+
+    <div class="section-title" style="margin-top:8px">Routing Distribution</div>
+    <div class="dist-bar-group" id="distBars">
+      <div class="dist-row"><span class="dist-label">ArbiNova</span><div class="dist-track"><div class="dist-fill" id="dist-rollupA" style="width:0%;background:var(--ra)"></div></div><span class="dist-count" id="cnt-rollupA">0</span></div>
+      <div class="dist-row"><span class="dist-label">OptiSwift</span><div class="dist-track"><div class="dist-fill" id="dist-rollupB" style="width:0%;background:var(--rb)"></div></div><span class="dist-count" id="cnt-rollupB">0</span></div>
+      <div class="dist-row"><span class="dist-label">ZkRapid</span><div class="dist-track"><div class="dist-fill" id="dist-rollupC" style="width:0%;background:var(--rc)"></div></div><span class="dist-count" id="cnt-rollupC">0</span></div>
+    </div>
+
+    <div class="section-title">Intent Batching Preview</div>
+    <div class="batch-row">
+      <input class="batch-input" type="number" id="batchCount" value="10" min="2" max="100" />
+      <button class="demo-btn" onclick="previewBatch()" style="border-color:var(--accent2);color:var(--accent2)">Simulate</button>
+    </div>
+    <div class="batch-result" id="batchResult" style="display:none"></div>
+
+    <div class="section-title" style="margin-top:14px">Demo Controls</div>
+    <div class="demo-controls">
+      <button class="demo-btn" onclick="spikeCongestion('rollupA',85)">Spike ArbiNova congestion</button>
+      <button class="demo-btn" onclick="spikeCongestion('rollupB',90)">Spike OptiSwift congestion</button>
+      <button class="demo-btn" onclick="spikeCongestion('rollupC',95)">Spike ZkRapid congestion</button>
+      <button class="demo-btn" onclick="resetCongestion()">Reset all</button>
+    </div>
+  </div>
+
+  <!-- Intent history -->
+  <div class="panel">
+    <div class="panel-title"><span class="dot"></span>Intent History</div>
+    <div class="history-table">
+      <div class="ht-header">
+        <span>ID / Type</span><span>Rollup</span><span>Fee (gwei)</span><span>Latency</span><span>Status</span>
+      </div>
+      <div id="historyRows">
+        <div style="color:var(--dim);font-size:.72rem;padding:16px 0;text-align:center">No intents yet</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ── Trust Model & Scalability Analysis ─────────────────────────────────── -->
+<div class="analysis-section">
+  <div class="analysis-header" onclick="toggleAnalysis()">
+    <div class="analysis-title">System Analysis: Trust Model, Centralisation Risks &amp; Scalability Argument</div>
+    <div class="analysis-toggle" id="analysisToggle">▼</div>
+  </div>
+  <div class="analysis-body" id="analysisBody">
+
+    <h3>1. Architecture Overview</h3>
+    <div class="arch-diagram">
+User Wallet
+    │  submit intent (type, amount, token, recipient, preference)
+    ▼
+IntentRegistry.sol  ←─  stores intent ID &amp; routing decision hash on-chain
+    │
+    ▼
+Off-chain Intent Router (this server)
+    ├─ scores RollupA (ArbiNova)  — fee, latency, success probability
+    ├─ scores RollupB (OptiSwift) — fee, latency, success probability
+    └─ scores RollupC (ZkRapid)   — fee, latency, success probability
+           │
+           └─→  selects winner  →  MockRollup.executeIntent()
+                                       │
+                                       ▼
+                            IntentRegistry.recordExecution()
+    </div>
+
+    <h3>2. Trust Assumptions</h3>
+    <p>The routing engine is <strong>off-chain</strong> — this is the primary trust assumption in the system. Users must trust that the router:</p>
+    <ul>
+      <li>Selects the genuinely best rollup for their preference (not the one paying the router a kickback).</li>
+      <li>Reports accurate fee and latency data (not spoofed).</li>
+      <li>Does not censor specific users or intents.</li>
+    </ul>
+    <p style="margin-top:8px">Mitigations implemented in this prototype:</p>
+    <ul>
+      <li><strong>On-chain reason hash</strong>: The keccak256 hash of the routing rationale is stored in IntentRegistry, letting any observer verify the router's stated reason after the fact.</li>
+      <li><strong>Open routing logic</strong>: The scoring algorithm is open-source — anyone can re-run it with the same rollup snapshots and verify the decision.</li>
+      <li><strong>User-controlled preference</strong>: Users express a routing preference (cheapest / fastest / balanced) that constrains the router's freedom.</li>
+    </ul>
+
+    <h3>3. Centralisation Risks</h3>
+    <p>A single router is a single point of failure and control. Risks:</p>
+    <ul>
+      <li><strong>Liveness</strong>: If the router goes offline, intents cannot be routed. Mitigation: multiple competing routers, user can fall back to direct submission.</li>
+      <li><strong>Censorship</strong>: Router can refuse to route certain addresses. Mitigation: permissionless fallback path directly to any rollup.</li>
+      <li><strong>MEV extraction</strong>: Router sees intent content before execution — can front-run. Mitigation: commit-reveal scheme or private mempool.</li>
+    </ul>
+
+    <h3>4. Scalability Argument</h3>
+    <p>Without a routing layer, users face the following friction in a multi-rollup world:</p>
+    <ul>
+      <li>Must manually compare fees across N rollups before every transaction.</li>
+      <li>Must bridge assets to the cheapest rollup before executing.</li>
+      <li>As N grows (hundreds of appchains), the UX becomes unusable.</li>
+    </ul>
+    <p style="margin-top:8px">The intent router solves this by:</p>
+    <ul>
+      <li><strong>Abstracting chain choice</strong>: Users express <em>what</em> they want, not <em>where</em> to do it.</li>
+      <li><strong>Automated routing</strong>: The router can query N rollups in parallel in milliseconds.</li>
+      <li><strong>Fee savings at scale</strong>: In high-congestion scenarios, routing to the least congested chain reduces fees by up to 6× (see benchmark analysis).</li>
+      <li><strong>Batching</strong>: Multiple intents with similar parameters can be batched into one on-chain transaction, amortising fixed calldata cost across N users.</li>
+    </ul>
+
+    <h3>5. When Routing Helps Most</h3>
+    <div class="code-block">Scenario A — Uniform congestion (all rollups ~50%):
+  Fee spread:  0.75 → 0.82 → 1.70 gwei
+  Saving from routing: ~0.95 gwei per intent   (moderate benefit)
+
+Scenario B — One congested rollup (rollupA ~90%, others ~20%):
+  Fee spread:  0.95 → 0.63 → 0.87 gwei
+  Router avoids rollupA, saves ~0.32 gwei      (routing critical)
+
+Scenario C — All congested equally (~90%):
+  Fee spread:  0.95 → 2.90 → 7.89 gwei
+  ZK rollup most expensive; routing saves 6.94 gwei (huge benefit)
+
+Scenario D — All lightly loaded (~5%):
+  Fee spread:  0.50 → 1.20 → 3.00 gwei
+  Routing overhead (~1ms) vs. fixed fee gap  (always beneficial)</div>
+    <p>Routing provides the highest value during <em>asymmetric congestion</em> — when different rollups have significantly different load at the same instant. This is common in practice as rollups serve different user segments.</p>
+
+    <h3>6. ZK vs. Optimistic Rollups</h3>
+    <p>This prototype includes both rollup types, reflecting the real-world ecosystem:</p>
+    <ul>
+      <li><strong>Optimistic rollups</strong> (ArbiNova, OptiSwift): lower base cost but 7-day withdrawal challenge window. Suitable for non-urgent DeFi, transfers.</li>
+      <li><strong>ZK rollups</strong> (ZkRapid): higher proof generation cost but instant cryptographic finality. Suitable for high-value swaps requiring settlement guarantees.</li>
+    </ul>
+    <p style="margin-top:8px">The routing engine correctly prefers optimistic rollups for "cheapest" intents and ZK rollups for "fastest" intents, matching the theoretical optimal for each type.</p>
+
+  </div>
+</div>
+
+</div><!-- /app -->
+
+<div id="toast"></div>
+
+<script>
+// ─── Config ────────────────────────────────────────────────────────────────
+const API   = "http://localhost:3001/api";
+const PREF_LABELS = { cheapest:"Cheapest", fastest:"Fastest", balanced:"Balanced" };
+const TYPE_LABELS = { payment:"Payment", token_swap:"Swap", asset_transfer:"Transfer" };
+
+// ─── State ─────────────────────────────────────────────────────────────────
+let preference  = "balanced";
+let isOnline    = false;
+let lastPreview = null;
+let pollingId   = null;
+
+// ─── Preference selector ──────────────────────────────────────────────────
+function setPref(p) {
+  preference = p;
+  ["cheapest","fastest","balanced"].forEach(k => {
+    document.getElementById("pref-"+k).classList.toggle("active", k === p);
+  });
+  livePreview();
+}
+
+// ─── API helpers ──────────────────────────────────────────────────────────
+async function apiFetch(path, opts = {}) {
+  const r = await fetch(API + path, {
+    headers: { "Content-Type": "application/json" },
+    ...opts,
+  });
+  if (!r.ok) throw new Error(await r.text());
+  return r.json();
+}
+
+// ─── Network status polling ───────────────────────────────────────────────
+async function pollRollups() {
+  try {
+    const data = await apiFetch("/rollups");
+    renderNetworkGrid(data.rollups);
+    setApiStatus(true);
+  } catch {
+    setApiStatus(false);
+  }
+}
+
+function setApiStatus(online) {
+  isOnline = online;
+  const el = document.getElementById("apiStatus");
+  el.className = "api-status " + (online ? "online" : "offline");
+  document.getElementById("apiStatusText").textContent = online ? "Router Online" : "Router Offline";
+}
+
+// ─── Render network grid ──────────────────────────────────────────────────
+let lastSelectedRollup = null;
+
+function renderNetworkGrid(rollups) {
+  const classMap = { rollupA:"ra", rollupB:"rb", rollupC:"rc" };
+  const grid     = document.getElementById("networkGrid");
+  grid.innerHTML = rollups.map(r => {
+    const cls      = classMap[r.id] || "";
+    const cLevel   = r.congestion;
+    const barClass = cLevel < 33 ? "low" : cLevel < 66 ? "med" : "high";
+    const selected = r.id === lastSelectedRollup;
+    return `
+<div class="rollup-card ${cls}${selected ? " selected-rollup" : ""}">
+  <div class="rc-header">
+    <div class="rc-name">${r.name}</div>
+    <div class="rc-type">${r.rollupType}</div>
+  </div>
+  <div class="rc-metrics">
+    <div class="rc-metric">
+      <div class="label">Fee</div>
+      <div class="value" style="color:var(--warn)">${r.fee} gwei</div>
+    </div>
+    <div class="rc-metric">
+      <div class="label">Latency</div>
+      <div class="value" style="color:var(--accent)">${r.latency} ms</div>
+    </div>
+    <div class="rc-metric">
+      <div class="label">Success</div>
+      <div class="value" style="color:var(--success)">${r.successProb}%</div>
+    </div>
+    <div class="rc-metric">
+      <div class="label">Executed</div>
+      <div class="value">${r.execCount}</div>
+    </div>
+  </div>
+  <div class="rc-bar-wrap">
+    <div class="rc-bar-label"><span>Congestion</span><span>${cLevel}%</span></div>
+    <div class="rc-bar-track">
+      <div class="rc-bar-fill ${barClass}" style="width:${cLevel}%"></div>
+    </div>
+  </div>
+</div>`;
+  }).join("");
+}
+
+// ─── Live preview ─────────────────────────────────────────────────────────
+async function livePreview() {
+  if (!isOnline) return;
+  try {
+    const data = await apiFetch("/intents/preview", {
+      method:"POST", body: JSON.stringify({ preference })
+    });
+    lastPreview = data;
+    renderRouteDisplay(data.winner, data.allScores, data.reasons, false);
+  } catch { /* silent */ }
+}
+
+// ─── Submit intent ────────────────────────────────────────────────────────
+async function submitIntent() {
+  const amount = parseFloat(document.getElementById("amount").value);
+  if (!amount || amount <= 0) { toast("Enter a valid amount", "error"); return; }
+
+  const body = {
+    intentType:  document.getElementById("intentType").value,
+    amount,
+    token:       document.getElementById("token").value,
+    recipient:   document.getElementById("recipient").value || undefined,
+    preference,
+    user:        "0xDEMO" + Math.random().toString(16).slice(2,10),
+  };
+
+  const btn = document.getElementById("submitBtn");
+  btn.disabled = true; btn.textContent = "Routing...";
+  try {
+    const data = await apiFetch("/intents", { method:"POST", body:JSON.stringify(body) });
+    lastSelectedRollup = data.intent.selectedRollup;
+    renderRouteDisplay(
+      data.intent.allScores[0], data.intent.allScores,
+      data.intent.routingReasons, true, data.intent
+    );
+    toast(`Routed to ${data.intent.selectedRollupName} ✓`, "ok");
+    // Poll for execution
+    pollIntentStatus(data.intent.id, data.intent.estimatedLatency + 1000);
+    refreshAnalytics();
+  } catch(e) {
+    toast("Router error: " + e.message, "error");
+  } finally {
+    btn.disabled = false; btn.textContent = "Submit Intent";
+  }
+}
+
+async function pollIntentStatus(id, delay) {
+  await sleep(delay);
+  try {
+    const intent = await apiFetch("/intents/" + id);
+    if (intent.status === "executed") {
+      refreshHistory();
+      toast(`Executed on ${intent.selectedRollupName} — fee: ${intent.actualFee} gwei`, "ok");
+    } else {
+      pollIntentStatus(id, 800);
+    }
+  } catch { /* ignore */ }
+}
+
+// ─── Render routing decision ──────────────────────────────────────────────
+function renderRouteDisplay(winner, allScores, reasons, submitted, intentData) {
+  if (!winner) return;
+  const rollupColors = { rollupA:"var(--ra)", rollupB:"var(--rb)", rollupC:"var(--rc)" };
+  const winColor     = rollupColors[winner.rollupId] || "var(--accent)";
+
+  const feeTag = submitted
+    ? `<span style="color:var(--success)">Save ${intentData.feeSaved} gwei</span>`
+    : `<span style="color:var(--dim)">preview</span>`;
+
+  const breakdown  = winner.scoreBreakdown;
+  const w          = breakdown.weights;
+
+  const compareRows = allScores.map((s, i) => {
+    const isWinner = i === 0;
+    return `<div class="compare-row ${isWinner ? "winner" : ""}">
+  <span class="compare-rank">${i + 1}</span>
+  <span class="compare-name" style="color:${rollupColors[s.rollupId]}">${s.name}</span>
+  <span class="compare-score">${s.score}</span>
+  <span class="compare-fee">${s.fee} gwei</span>
+  <span class="compare-lat">${s.latency} ms</span>
+</div>`;
+  }).join("");
+
+  const reasonLines = reasons.map(r => `<div class="reason-line">${r}</div>`).join("");
+
+  document.getElementById("routeDisplay").innerHTML = `
+<div class="selected-badge">
+  <span class="checkmark">✓</span>
+  <span class="rname" style="color:${winColor}">${winner.name}</span>
+  <span style="color:var(--dim);font-size:.7rem">${submitted ? "selected" : "preview"}</span>
+  <span class="rscore">Score: ${winner.score}/100  ${feeTag}</span>
+</div>
+
+<div class="info-tiles">
+  <div class="tile">
+    <div class="tile-label">Est. Fee</div>
+    <div class="tile-value warn">${winner.fee} gwei</div>
+  </div>
+  <div class="tile">
+    <div class="tile-label">Latency</div>
+    <div class="tile-value">${winner.latency} ms</div>
+  </div>
+  <div class="tile">
+    <div class="tile-label">Success</div>
+    <div class="tile-value green">${winner.successProb}%</div>
+  </div>
+</div>
+
+<div class="score-bars">
+  <div class="score-row">
+    <div class="score-row-hd">
+      <span>Fee Score <span style="color:var(--dim)">(weight ${Math.round(w.fee*100)}%)</span></span>
+      <span>${breakdown.feeScore}</span>
+    </div>
+    <div class="score-track"><div class="score-fill" style="width:${breakdown.feeScore}%;background:var(--warn)"></div></div>
+  </div>
+  <div class="score-row">
+    <div class="score-row-hd">
+      <span>Latency Score <span style="color:var(--dim)">(weight ${Math.round(w.latency*100)}%)</span></span>
+      <span>${breakdown.latencyScore}</span>
+    </div>
+    <div class="score-track"><div class="score-fill" style="width:${breakdown.latencyScore}%;background:var(--accent)"></div></div>
+  </div>
+  <div class="score-row">
+    <div class="score-row-hd">
+      <span>Success Score <span style="color:var(--dim)">(weight ${Math.round(w.success*100)}%)</span></span>
+      <span>${breakdown.successScore}</span>
+    </div>
+    <div class="score-track"><div class="score-fill" style="width:${breakdown.successScore}%;background:var(--success)"></div></div>
+  </div>
+</div>
+
+<div style="font-size:.65rem;color:var(--dim);letter-spacing:1px;text-transform:uppercase;margin-bottom:8px">All Options</div>
+<div class="rollup-compare">${compareRows}</div>
+
+<div class="reasons-box">${reasonLines}</div>`;
+}
+
+// ─── History ──────────────────────────────────────────────────────────────
+async function refreshHistory() {
+  try {
+    const { intents } = await apiFetch("/intents/history");
+    const container   = document.getElementById("historyRows");
+    if (!intents.length) {
+      container.innerHTML = `<div style="color:var(--dim);font-size:.72rem;padding:16px 0;text-align:center">No intents yet</div>`;
+      return;
+    }
+    container.innerHTML = intents.map(i => `
+<div class="ht-row">
+  <span style="color:var(--dim)">${i.id.slice(0,10)}… <span style="color:var(--text)">${TYPE_LABELS[i.intentType]||i.intentType}</span></span>
+  <span style="color:${rollupColor(i.selectedRollup)}">${i.selectedRollupName}</span>
+  <span style="color:var(--warn)">${i.actualFee || i.estimatedFee}</span>
+  <span style="color:var(--dim)">${i.estimatedLatency}ms</span>
+  <span><span class="status-chip ${i.status}">${i.status}</span></span>
+</div>`).join("");
+  } catch { /* offline */ }
+}
+
+function rollupColor(id) {
+  return id === "rollupA" ? "var(--ra)" : id === "rollupB" ? "var(--rb)" : "var(--rc)";
+}
+
+// ─── Analytics ────────────────────────────────────────────────────────────
+async function refreshAnalytics() {
+  try {
+    const d = await apiFetch("/analytics");
+    document.getElementById("statTotal").textContent = d.totalIntents;
+    document.getElementById("statExec").textContent  = d.totalExecuted;
+    document.getElementById("statSaved").textContent = d.totalFeeSaved;
+    document.getElementById("statAvgFee").textContent= d.avgFee;
+
+    const maxCount = Math.max(1, ...Object.values(d.byRollup).map(r => r.count));
+    ["rollupA","rollupB","rollupC"].forEach(id => {
+      const cnt = d.byRollup[id]?.count || 0;
+      document.getElementById("dist-" + id).style.width = (cnt / maxCount * 100) + "%";
+      document.getElementById("cnt-" + id).textContent  = cnt;
+    });
+  } catch { /* offline */ }
+}
+
+// ─── Batch preview ────────────────────────────────────────────────────────
+async function previewBatch() {
+  const count = parseInt(document.getElementById("batchCount").value) || 10;
+  try {
+    const d = await apiFetch("/intents/batch-preview", {
+      method:"POST", body:JSON.stringify({ count, preference })
+    });
+    const el = document.getElementById("batchResult");
+    el.style.display = "block";
+    el.innerHTML = `
+<div>Rollup: <span style="color:var(--accent)">${d.rollup}</span></div>
+<div>Single intent fee: <span style="color:var(--warn)">${d.singleFee} gwei</span></div>
+<div>Batch (${d.count} intents) fee per intent: <span style="color:var(--success)">${d.batchFeePerIntent} gwei</span></div>
+<div>Total saving: <span class="highlight">${d.totalSaving} gwei (${d.savingPct}% reduction)</span></div>`;
+  } catch(e) { toast("Batch preview failed", "error"); }
+}
+
+// ─── Demo controls ────────────────────────────────────────────────────────
+async function spikeCongestion(rollupId, level) {
+  try {
+    await apiFetch("/simulate/congestion", {
+      method:"POST", body:JSON.stringify({ rollupId, level })
+    });
+    toast(`Congestion set to ${level}% on ${rollupId}`, "ok");
+    await pollRollups();
+    await livePreview();
+  } catch { toast("Server offline — start router first", "error"); }
+}
+
+async function resetCongestion() {
+  const defaults = { rollupA:10, rollupB:35, rollupC:55 };
+  for (const [id, level] of Object.entries(defaults)) {
+    await apiFetch("/simulate/congestion", {
+      method:"POST", body:JSON.stringify({ rollupId:id, level })
+    }).catch(()=>{});
+  }
+  await pollRollups();
+  toast("Congestion reset to defaults", "ok");
+}
+
+// ─── Analysis accordion ───────────────────────────────────────────────────
+function toggleAnalysis() {
+  const body   = document.getElementById("analysisBody");
+  const toggle = document.getElementById("analysisToggle");
+  const open   = body.classList.toggle("open");
+  toggle.classList.toggle("open", open);
+}
+
+// ─── Toast ────────────────────────────────────────────────────────────────
+let toastTimer;
+function toast(msg, type = "") {
+  const el = document.getElementById("toast");
+  el.textContent = msg;
+  el.className   = "show " + type;
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => el.className = "", 3200);
+}
+
+// ─── Init + polling ───────────────────────────────────────────────────────
+function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
+
+async function startPolling() {
+  await pollRollups();
+  await livePreview();
+  await refreshHistory();
+  await refreshAnalytics();
+
+  setInterval(pollRollups,        4000);
+  setInterval(livePreview,        6000);
+  setInterval(refreshHistory,     5000);
+  setInterval(refreshAnalytics,   7000);
+}
+
+startPolling();
+</script>
+</body>
+</html>
