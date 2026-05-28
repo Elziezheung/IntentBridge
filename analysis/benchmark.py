@@ -675,30 +675,37 @@ if __name__ == "__main__":
         ax.legend()
         ax.grid(axis="y", alpha=0.3)
 
-        # Plot 2: Rollup routing distribution (balanced, all scenarios stacked)
+        # Plot 2: Rollup routing distribution by user preference.
+        #
+        # The old version showed only balanced preference, which is technically
+        # correct but visually misleading: balanced is expected to pick the
+        # middle rollup (OptiSwift) almost every time.  Aggregating by preference
+        # makes the router's behaviour clearer for presentation: cheapest,
+        # balanced, and fastest each select different execution environments.
         ax2    = axes[1]
         rnames = [r.name for r in ROLLUPS]
         rids   = [r.id   for r in ROLLUPS]
         rcolors= {"rollupA": "#00e5ff", "rollupB": "#ff4560", "rollupC": "#7b61ff"}
 
         bar_data = {rid: [] for rid in rids}
-        for s in SCENARIOS:
-            res = next(r for r in results if r.preference == "balanced" and r.scenario == s)
+        for pref in PREFERENCES:
+            pref_results = [r for r in results if r.preference == pref]
             for rid in rids:
-                bar_data[rid].append(res.rollup_picks.get(rid, 0))
+                bar_data[rid].append(sum(r.rollup_picks.get(rid, 0) for r in pref_results))
 
-        x2    = np.arange(len(SCENARIOS))
-        bottom = np.zeros(len(SCENARIOS))
+        pref_labels = [p.capitalize() for p in PREFERENCES]
+        x2    = np.arange(len(PREFERENCES))
+        bottom = np.zeros(len(PREFERENCES))
         for rid, rname in zip(rids, rnames):
             vals = np.array(bar_data[rid])
             ax2.bar(x2, vals, bottom=bottom, label=rname, color=rcolors[rid], alpha=0.85)
             bottom += vals
 
-        ax2.set_xlabel("Congestion Scenario")
+        ax2.set_xlabel("User Routing Preference")
         ax2.set_ylabel("Number of Intents Routed")
-        ax2.set_title("Routing Distribution (Balanced Preference)")
+        ax2.set_title("Routing Distribution by Preference\n(aggregated across all congestion scenarios)")
         ax2.set_xticks(x2)
-        ax2.set_xticklabels(scenario_labels, fontsize=8, rotation=10)
+        ax2.set_xticklabels(pref_labels, fontsize=8)
         ax2.legend()
         ax2.grid(axis="y", alpha=0.3)
 
