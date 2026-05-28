@@ -706,7 +706,7 @@ if __name__ == "__main__":
         out1 = "analysis/benchmark_results.png"
         plt.savefig(out1, dpi=150)
         print(f"\n  Chart saved to {out1}")
-        plt.show()
+        # plt.show()  # omitted — prevents blocking when run non-interactively
 
         # Chart 2: strategy baseline comparison
         fig2, (ax3, ax4) = plt.subplots(1, 2, figsize=(13, 5))
@@ -732,7 +732,7 @@ if __name__ == "__main__":
         out2 = "analysis/baseline_comparison.png"
         fig2.savefig(out2, dpi=150)
         print(f"  Chart saved to {out2}")
-        plt.show()
+        # plt.show()  # omitted — prevents blocking when run non-interactively
 
         # Chart 3: intent-type benchmark (balanced preference)
         bal_it      = [r for r in intent_results if r.preference == "balanced"]
@@ -778,7 +778,7 @@ if __name__ == "__main__":
         out3 = "analysis/intent_type_benchmark.png"
         fig3.savefig(out3, dpi=150)
         print(f"  Chart saved to {out3}")
-        plt.show()
+        # plt.show()  # omitted — prevents blocking when run non-interactively
 
         # Chart 4: routing decision in preference-weight space
         # ──────────────────────────────────────────────────────────────────────
@@ -871,7 +871,7 @@ if __name__ == "__main__":
         out4 = "analysis/routing_heatmap.png"
         fig4.savefig(out4, dpi=150, bbox_inches="tight")
         print(f"  Chart saved to {out4}")
-        plt.show()
+        # plt.show()  # omitted — prevents blocking when run non-interactively
 
     except ImportError:
         print("\n  (Install matplotlib + numpy to generate charts)")
